@@ -1,9 +1,10 @@
 from sympy.utilities.pytest import XFAIL, raises
 from sympy import (
-    symbols, lambdify, sqrt, sin, cos, tan, pi, atan, acos, acosh, Rational,
-    Float, Matrix, Lambda, exp, Integral, oo, I, Abs, Function, true, false)
+    symbols, lambdify, sqrt, sin, cos, tan, pi, acos, acosh, Rational,
+    Float, Matrix, Lambda, Piecewise, exp, Integral, oo, I, Abs, Function,
+    true, false, And, Or, Not)
 from sympy.printing.lambdarepr import LambdaPrinter
-from sympy import mpmath
+import mpmath
 from sympy.utilities.lambdify import implemented_function
 from sympy.utilities.pytest import skip
 from sympy.utilities.decorator import conserve_mpmath_dps
@@ -11,9 +12,6 @@ from sympy.external import import_module
 import math
 import sympy
 
-# TODO: This should be removed for the release of 0.7.7, see issue #7853
-from functools import partial
-lambdify = partial(lambdify, default_array=True)
 
 MutableDenseMatrix = Matrix
 
@@ -59,8 +57,6 @@ def test_own_namespace():
 def test_own_module():
     f = lambdify(x, sin(x), math)
     assert f(0) == 0.0
-    f = lambdify(x, sympy.ceiling(x), math)
-    raises(NameError, lambda: f(4.5))
 
 
 def test_bad_args():
@@ -101,7 +97,7 @@ def test_math_lambda():
     f = lambdify(x, sin(x), "math")
     prec = 1e-15
     assert -prec < f(0.2) - sin02 < prec
-    raises(ValueError, lambda: f(x))
+    raises(TypeError, lambda: f(x))
            # if this succeeds, it can't be a python math function
 
 
@@ -184,6 +180,17 @@ def test_numexpr_printer():
         args = arg_tuple[:nargs]
         f = lambdify(args, ssym(*args), modules='numexpr')
         assert f(*(1, )*nargs) is not None
+
+def test_issue_9334():
+    if not numexpr:
+        skip("numexpr not installed.")
+    if not numpy:
+        skip("numpy not installed.")
+    expr = sympy.S('b*a - sqrt(a**2)')
+    a, b = sorted(expr.free_symbols, key=lambda s: s.name)
+    func_numexpr = lambdify((a,b), expr, modules=[numexpr], dummify=False)
+    foo, bar = numpy.random.random((2, 4))
+    func_numexpr(foo, bar)
 
 #================== Test some functions ============================
 
@@ -292,11 +299,71 @@ def test_numpy_matrix():
         skip("numpy not installed.")
     A = Matrix([[x, x*y], [sin(z) + 4, x**z]])
     sol_arr = numpy.array([[1, 2], [numpy.sin(3) + 4, 1]])
-    #Lambdify array first, to ensure return to matrix as default
-    f = lambdify((x, y, z), A)
+    #Lambdify array first, to ensure return to array as default
+    f = lambdify((x, y, z), A, ['numpy'])
     numpy.testing.assert_allclose(f(1, 2, 3), sol_arr)
     #Check that the types are arrays and matrices
     assert isinstance(f(1, 2, 3), numpy.ndarray)
+
+def test_numpy_transpose():
+    if not numpy:
+        skip("numpy not installed.")
+    A = Matrix([[1, x], [0, 1]])
+    f = lambdify((x), A.T, modules="numpy")
+    numpy.testing.assert_array_equal(f(2), numpy.array([[1, 0], [2, 1]]))
+
+def test_numpy_inverse():
+    if not numpy:
+        skip("numpy not installed.")
+    A = Matrix([[1, x], [0, 1]])
+    f = lambdify((x), A**-1, modules="numpy")
+    numpy.testing.assert_array_equal(f(2), numpy.array([[1, -2], [0,  1]]))
+
+def test_numpy_old_matrix():
+    if not numpy:
+        skip("numpy not installed.")
+    A = Matrix([[x, x*y], [sin(z) + 4, x**z]])
+    sol_arr = numpy.array([[1, 2], [numpy.sin(3) + 4, 1]])
+    f = lambdify((x, y, z), A, [{'ImmutableMatrix': numpy.matrix}, 'numpy'])
+    numpy.testing.assert_allclose(f(1, 2, 3), sol_arr)
+    assert isinstance(f(1, 2, 3), numpy.matrix)
+
+def test_numpy_piecewise():
+    if not numpy:
+        skip("numpy not installed.")
+    pieces = Piecewise((x, x < 3), (x**2, x > 5), (0, True))
+    f = lambdify(x, pieces, modules="numpy")
+    numpy.testing.assert_array_equal(f(numpy.arange(10)),
+                                     numpy.array([0, 1, 2, 0, 0, 0, 36, 49, 64, 81]))
+    # If we evaluate somewhere all conditions are False, we should get back NaN
+    nodef_func = lambdify(x, Piecewise((x, x > 0), (-x, x < 0)))
+    numpy.testing.assert_array_equal(nodef_func(numpy.array([-1, 0, 1])),
+                                     numpy.array([1, numpy.nan, 1]))
+
+def test_numpy_logical_ops():
+    if not numpy:
+        skip("numpy not installed.")
+    and_func = lambdify((x, y), And(x, y), modules="numpy")
+    or_func = lambdify((x, y), Or(x, y), modules="numpy")
+    not_func = lambdify((x), Not(x), modules="numpy")
+    arr1 = numpy.array([True, True])
+    arr2 = numpy.array([False, True])
+    numpy.testing.assert_array_equal(and_func(arr1, arr2), numpy.array([False, True]))
+    numpy.testing.assert_array_equal(or_func(arr1, arr2), numpy.array([True, True]))
+    numpy.testing.assert_array_equal(not_func(arr2), numpy.array([True, False]))
+
+def test_numpy_matmul():
+    if not numpy:
+        skip("numpy not installed.")
+    xmat = Matrix([[x, y], [z, 1+z]])
+    ymat = Matrix([[x**2], [Abs(x)]])
+    mat_func = lambdify((x, y, z), xmat*ymat, modules="numpy")
+    numpy.testing.assert_array_equal(mat_func(0.5, 3, 4), numpy.array([[1.625], [3.5]]))
+    numpy.testing.assert_array_equal(mat_func(-0.5, 3, 4), numpy.array([[1.375], [3.5]]))
+    # Multiple matrices chained together in multiplication
+    f = lambdify((x, y, z), xmat*xmat*xmat, modules="numpy")
+    numpy.testing.assert_array_equal(f(0.5, 3, 4), numpy.array([[72.125, 119.25],
+                                                                [159, 251]]))
 
 def test_numpy_numexpr():
     if not numpy:
@@ -454,6 +521,23 @@ def test_python_keywords():
     expr = python_if / 2
     f = lambdify(python_if, expr)
     assert f(4.0) == 2.0
+
+
+def test_lambdify_docstring():
+    func = lambdify((w, x, y, z), w + x + y + z)
+    assert func.__doc__ == (
+            "Created with lambdify. Signature:\n\n"
+            "func(w, x, y, z)\n\n"
+            "Expression:\n\n"
+            "w + x + y + z")
+    syms = symbols('a1:26')
+    func = lambdify(syms, sum(syms))
+    assert func.__doc__ == (
+            "Created with lambdify. Signature:\n\n"
+            "func(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15,\n"
+            "        a16, a17, a18, a19, a20, a21, a22, a23, a24, a25)\n\n"
+            "Expression:\n\n"
+            "a1 + a10 + a11 + a12 + a13 + a14 + a15 + a16 + a17 + a18 + a19 + a2 + a20 +...")
 
 
 #================== Test special printers ==========================

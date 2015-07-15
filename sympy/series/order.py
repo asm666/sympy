@@ -1,6 +1,6 @@
 from __future__ import print_function, division
 
-from sympy.core import Basic, S, sympify, Expr, Rational, Symbol, Dummy
+from sympy.core import S, sympify, Expr, Rational, Symbol, Dummy
 from sympy.core import Add, Mul, expand_power_base, expand_log
 from sympy.core.cache import cacheit
 from sympy.core.compatibility import default_sort_key, is_sequence
@@ -294,6 +294,8 @@ class Order(Expr):
     def _eval_power(b, e):
         if e.is_Number and e.is_nonnegative:
             return b.func(b.expr ** e, *b.args[1:])
+        if e == O(1):
+            return b
         return
 
     def as_expr_variables(self, order_symbols):
@@ -304,7 +306,7 @@ class Order(Expr):
                not all(p == self.point[0] for p in self.point):
                 raise NotImplementedError('Order at points other than 0 '
                     'or oo not supported, got %s as a point.' % point)
-            if order_symbols[0][1] != self.point[0]:
+            if order_symbols and order_symbols[0][1] != self.point[0]:
                 raise NotImplementedError(
                         "Multiplying Order at different points is not supported.")
             order_symbols = dict(order_symbols)
@@ -328,7 +330,7 @@ class Order(Expr):
         Return None if the inclusion relation cannot be determined
         (e.g. when self and expr have different symbols).
         """
-        from sympy import powsimp, PoleError
+        from sympy import powsimp
         if expr is S.Zero:
             return True
         if expr is S.NaN:
@@ -369,9 +371,11 @@ class Order(Expr):
             ratio = self.expr/expr.expr
             ratio = powsimp(ratio, deep=True, combine='exp')
             for s in common_symbols:
-                try:
-                    l = ratio.limit(s, point) != 0
-                except PoleError:
+                l = ratio.limit(s, point)
+                from sympy.series.limits import Limit
+                if not isinstance(l, Limit):
+                    l = l != 0
+                else:
                     l = None
                 if r is None:
                     r = l

@@ -1,8 +1,12 @@
+from __future__ import division
 from sympy import symbols, Matrix, solve, simplify, cos, sin, atan, sqrt
 from sympy.physics.mechanics import dynamicsymbols, ReferenceFrame, Point,\
     dot, cross, inertia, KanesMethod, Particle, RigidBody, Lagrangian,\
     LagrangesMethod
+from sympy.utilities.pytest import slow
 
+
+@slow
 def test_linearize_rolling_disc_kane():
     # Symbols for time and constant parameters
     t, r, m, g, v = symbols('t r m g v')
