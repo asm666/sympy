@@ -1,7 +1,7 @@
 from sympy import (
-    Abs, Chi, Ci, CosineTransform, Dict, Ei, Eq, FallingFactorial, FiniteSet,
-    Float, FourierTransform, Function, IndexedBase, Integral, Interval,
-    InverseCosineTransform, InverseFourierTransform,
+    Add, Abs, Chi, Ci, CosineTransform, Dict, Ei, Eq, FallingFactorial,
+    FiniteSet, Float, FourierTransform, Function, IndexedBase, Integral,
+    Interval, InverseCosineTransform, InverseFourierTransform,
     InverseLaplaceTransform, InverseMellinTransform, InverseSineTransform,
     Lambda, LaplaceTransform, Limit, Matrix, Max, MellinTransform, Min, Mul,
     Order, Piecewise, Poly, ring, field, ZZ, Pow, Product, Range, Rational,
@@ -10,11 +10,14 @@ from sympy import (
     assoc_laguerre, assoc_legendre, binomial, catalan, ceiling, Complement,
     chebyshevt, chebyshevu, conjugate, cot, coth, diff, dirichlet_eta,
     exp, expint, factorial, factorial2, floor, gamma, gegenbauer, hermite,
-    hyper, im, im, jacobi, laguerre, legendre, lerchphi, log, lowergamma,
-    meijerg, oo, polar_lift, polylog, re, re, root, sin, sqrt, symbols,
+    hyper, im, jacobi, laguerre, legendre, lerchphi, log, lowergamma,
+    meijerg, oo, polar_lift, polylog, re, root, sin, sqrt, symbols,
     uppergamma, zeta, subfactorial, totient, elliptic_k, elliptic_f,
     elliptic_e, elliptic_pi, cos, tan, Wild, true, false, Equivalent, Not,
-    Contains)
+    Contains, divisor_sigma, SymmetricDifference, SeqPer, SeqFormula,
+    SeqAdd, SeqMul, fourier_series, pi)
+
+from sympy.ntheory.factor_ import udivisor_sigma
 
 from sympy.abc import mu, tau
 from sympy.printing.latex import latex, translate
@@ -23,6 +26,7 @@ from sympy.functions import DiracDelta, Heaviside, KroneckerDelta, LeviCivita
 from sympy.logic import Implies
 from sympy.logic.boolalg import And, Or, Xor
 from sympy.core.trace import Tr
+from sympy.core.compatibility import range
 
 x, y, z, t, a, b = symbols('x y z t a b')
 k, m, n = symbols('k m n', integer=True)
@@ -98,6 +102,8 @@ def test_latex_basic():
     assert latex((x & y) | z) == r"z \vee \left(x \wedge y\right)"
     assert latex(Implies(x, y)) == r"x \Rightarrow y"
     assert latex(~(x >> ~y)) == r"x \not\Rightarrow \neg y"
+    assert latex(Implies(Or(x,y), z)) == r"\left(x \vee y\right) \Rightarrow z"
+    assert latex(Implies(z, Or(x,y))) == r"z \Rightarrow \left(x \vee y\right)"
 
     assert latex(~x, symbol_names={x: "x_i"}) == r"\neg x_i"
     assert latex(x & y, symbol_names={x: "x_i", y: "y_i"}) == \
@@ -219,9 +225,8 @@ def test_latex_functions():
 
     assert latex(binomial(2, k)) == r"{\binom{2}{k}}"
 
-    assert latex(
-        FallingFactorial(3, k)) == r"{\left(3\right)}_{\left(k\right)}"
-    assert latex(RisingFactorial(3, k)) == r"{\left(3\right)}^{\left(k\right)}"
+    assert latex(FallingFactorial(3, k)) == r"{\left(3\right)}_{k}"
+    assert latex(RisingFactorial(3, k)) == r"{3}^{\left(k\right)}"
 
     assert latex(floor(x)) == r"\lfloor{x}\rfloor"
     assert latex(ceiling(x)) == r"\lceil{x}\rceil"
@@ -229,7 +234,7 @@ def test_latex_functions():
     assert latex(Min(x, y)**2) == r"\min\left(x, y\right)^{2}"
     assert latex(Max(x, 2, x**3)) == r"\max\left(2, x, x^{3}\right)"
     assert latex(Max(x, y)**2) == r"\max\left(x, y\right)^{2}"
-    assert latex(Abs(x)) == r"\left\lvert{x}\right\rvert"
+    assert latex(Abs(x)) == r"\left|{x}\right|"
     assert latex(re(x)) == r"\Re{x}"
     assert latex(re(x + y)) == r"\Re{x} + \Re{y}"
     assert latex(im(x)) == r"\Im{x}"
@@ -330,6 +335,16 @@ def test_latex_functions():
 
     assert latex(totient(n)) == r'\phi\left( n \right)'
 
+    assert latex(divisor_sigma(x)) == r"\sigma\left(x\right)"
+    assert latex(divisor_sigma(x)**2) == r"\sigma^{2}\left(x\right)"
+    assert latex(divisor_sigma(x, y)) == r"\sigma_y\left(x\right)"
+    assert latex(divisor_sigma(x, y)**2) == r"\sigma^{2}_y\left(x\right)"
+
+    assert latex(udivisor_sigma(x)) == r"\sigma^*\left(x\right)"
+    assert latex(udivisor_sigma(x)**2) == r"\sigma^*^{2}\left(x\right)"
+    assert latex(udivisor_sigma(x, y)) == r"\sigma^*_y\left(x\right)"
+    assert latex(udivisor_sigma(x, y)**2) == r"\sigma^*^{2}_y\left(x\right)"
+
     # some unknown function name should get rendered with \operatorname
     fjlkd = Function('fjlkd')
     assert latex(fjlkd(x)) == r'\operatorname{fjlkd}{\left (x \right )}'
@@ -429,6 +444,7 @@ def test_latex_derivatives():
     assert latex(diff(Integral(exp(-x * y), (x, 0, oo)), y, evaluate=False)) == \
         r"\frac{d}{d y} \int_{0}^{\infty} e^{- x y}\, dx"
 
+
 def test_latex_subs():
     assert latex(Subs(x*y, (
         x, y), (1, 2))) == r'\left. x y \right|_{\substack{ x=1\\ y=2 }}'
@@ -475,6 +491,58 @@ def test_latex_Range():
     assert latex(Range(1, 4)) == r'\left\{1, 2, 3\right\}'
 
 
+def test_latex_sequences():
+    s1 = SeqFormula(a**2, (0, oo))
+    s2 = SeqPer((1, 2))
+
+    latex_str = r'\left\[0, 1, 4, 9, \ldots\right\]'
+    assert latex(s1) == latex_str
+
+    latex_str = r'\left\[1, 2, 1, 2, \ldots\right\]'
+    assert latex(s2) == latex_str
+
+    s3 = SeqFormula(a**2, (0, 2))
+    s4 = SeqPer((1, 2), (0, 2))
+
+    latex_str = r'\left\[0, 1, 4\right\]'
+    assert latex(s3) == latex_str
+
+    latex_str = r'\left\[1, 2, 1\right\]'
+    assert latex(s4) == latex_str
+
+    s5 = SeqFormula(a**2, (-oo, 0))
+    s6 = SeqPer((1, 2), (-oo, 0))
+
+    latex_str = r'\left\[\ldots, 9, 4, 1, 0\right\]'
+    assert latex(s5) == latex_str
+
+    latex_str = r'\left\[\ldots, 2, 1, 2, 1\right\]'
+    assert latex(s6) == latex_str
+
+    latex_str = r'\left\[1, 3, 5, 11, \ldots\right\]'
+    assert latex(SeqAdd(s1, s2)) == latex_str
+
+    latex_str = r'\left\[1, 3, 5\right\]'
+    assert latex(SeqAdd(s3, s4)) == latex_str
+
+    latex_str = r'\left\[\ldots, 11, 5, 3, 1\right\]'
+    assert latex(SeqAdd(s5, s6)) == latex_str
+
+    latex_str = r'\left\[0, 2, 4, 18, \ldots\right\]'
+    assert latex(SeqMul(s1, s2)) == latex_str
+
+    latex_str = r'\left\[0, 2, 4\right\]'
+    assert latex(SeqMul(s3, s4)) == latex_str
+
+    latex_str = r'\left\[\ldots, 18, 4, 2, 0\right\]'
+    assert latex(SeqMul(s5, s6)) == latex_str
+
+
+def test_latex_FourierSeries():
+    latex_str = r'2 \sin{\left (x \right )} - \sin{\left (2 x \right )} + \frac{2}{3} \sin{\left (3 x \right )} + \ldots'
+    assert latex(fourier_series(x, (x, -pi, pi))) == latex_str
+
+
 def test_latex_intervals():
     a = Symbol('a', real=True)
     assert latex(Interval(0, 0)) == r"\left\{0\right\}"
@@ -496,8 +564,17 @@ def test_latex_union():
         r"\left\{1, 2\right\} \cup \left[3, 4\right]"
 
 
+def test_latex_symmetric_difference():
+    assert latex(SymmetricDifference(Interval(2,5), Interval(4,7), \
+        evaluate = False)) == r'\left[2, 5\right] \triangle \left[4, 7\right]'
+
+
 def test_latex_Complement():
     assert latex(Complement(S.Reals, S.Naturals)) == r"\mathbb{R} \setminus \mathbb{N}"
+
+
+def test_latex_Complex():
+    assert latex(S.Complex) == r"\mathbb{C}"
 
 
 def test_latex_productset():
@@ -545,6 +622,11 @@ def test_latex_product():
 
 def test_latex_limits():
     assert latex(Limit(x, x, oo)) == r"\lim_{x \to \infty} x"
+
+    # issue 8175
+    f = Function('f')
+    assert latex(Limit(f(x), x, 0)) == r"\lim_{x \to 0^+} f{\left (x \right )}"
+    assert latex(Limit(f(x), x, 0, "-")) == r"\lim_{x \to 0^-} f{\left (x \right )}"
 
 
 def test_issue_3568():
@@ -878,6 +960,7 @@ def test_matMul():
     assert l._print_MatMul(-2*A*(A + 2*B)) in [r'-2 A \left(A + 2 B\right)',
         r'-2 A \left(2 B + A\right)']
 
+
 def test_latex_MatrixSlice():
     from sympy.matrices.expressions import MatrixSymbol
     assert latex(MatrixSymbol('X', 10, 10)[:5, 1:9:2]) == \
@@ -885,10 +968,11 @@ def test_latex_MatrixSlice():
     assert latex(MatrixSymbol('X', 10, 10)[5, :5:2]) == \
             r'X\left[5, :5:2\right]'
 
+
 def test_latex_RandomDomain():
     from sympy.stats import Normal, Die, Exponential, pspace, where
     X = Normal('x1', 0, 1)
-    assert latex(where(X > 0)) == "Domain: x_{1} > 0"
+    assert latex(where(X > 0)) == r"Domain: 0 < x_{1} \wedge x_{1} < \infty"
 
     D = Die('d1', 6)
     assert latex(where(D > 4)) == r"Domain: d_{1} = 5 \vee d_{1} = 6"
@@ -896,7 +980,8 @@ def test_latex_RandomDomain():
     A = Exponential('a', 1)
     B = Exponential('b', 1)
     assert latex(
-        pspace(Tuple(A, B)).domain) == "Domain: a \geq 0 \wedge b \geq 0"
+        pspace(Tuple(A, B)).domain) == \
+        r"Domain: 0 \leq a \wedge 0 \leq b \wedge a < \infty \wedge b < \infty"
 
 
 def test_PrettyPoly():
@@ -1061,6 +1146,11 @@ def test_Hadamard():
     assert latex(HadamardProduct(X, Y)*Y) == r'\left(X \circ Y\right) Y'
 
 
+def test_ZeroMatrix():
+    from sympy import ZeroMatrix
+    assert latex(ZeroMatrix(1, 1)) == r"\mathbb{0}"
+
+
 def test_boolean_args_order():
     syms = symbols('a:f')
 
@@ -1077,7 +1167,6 @@ def test_boolean_args_order():
     assert latex(expr) == 'a \\veebar b \\veebar c \\veebar d \\veebar e \\veebar f'
 
 
-
 def test_imaginary():
     i = sqrt(-1)
     assert latex(i) == r'i'
@@ -1090,6 +1179,7 @@ def test_builtins_without_args():
     assert latex(log) == r'\log'
     assert latex(Ei) == r'\operatorname{Ei}'
     assert latex(zeta) == r'\zeta'
+
 
 def test_latex_greek_functions():
     # bug because capital greeks that have roman equivalents should not use
@@ -1113,6 +1203,7 @@ def test_latex_greek_functions():
     assert latex(c(x)) == r'\chi{\left (x \right )}'
     assert latex(c) == r'\chi'
 
+
 def test_translate():
     s = 'Alpha'
     assert translate(s) == 'A'
@@ -1129,10 +1220,12 @@ def test_translate():
     s = 'LamdaHatDOT'
     assert translate(s) == r'\dot{\hat{\Lambda}}'
 
+
 def test_other_symbols():
     from sympy.printing.latex import other_symbols
     for s in other_symbols:
         assert latex(symbols(s)) == "\\"+s
+
 
 def test_modifiers():
     # Test each modifier individually in the simplest case (with funny capitalizations)
@@ -1147,14 +1240,14 @@ def test_modifiers():
     assert latex(symbols("xDdDot")) == r"\dddot{x}"
     assert latex(symbols("xDDot")) == r"\ddot{x}"
     assert latex(symbols("xBold")) == r"\boldsymbol{x}"
-    assert latex(symbols("xnOrM")) == r"\left\lVert{x}\right\rVert"
+    assert latex(symbols("xnOrM")) == r"\left\|{x}\right\|"
     assert latex(symbols("xAVG")) == r"\left\langle{x}\right\rangle"
     assert latex(symbols("xHat")) == r"\hat{x}"
     assert latex(symbols("xDot")) == r"\dot{x}"
     assert latex(symbols("xBar")) == r"\bar{x}"
     assert latex(symbols("xVec")) == r"\vec{x}"
-    assert latex(symbols("xAbs")) == r"\left\lvert{x}\right\rvert"
-    assert latex(symbols("xMag")) == r"\left\lvert{x}\right\rvert"
+    assert latex(symbols("xAbs")) == r"\left|{x}\right|"
+    assert latex(symbols("xMag")) == r"\left|{x}\right|"
     assert latex(symbols("xPrM")) == r"{x}'"
     assert latex(symbols("xBM")) == r"\boldsymbol{x}"
     # Test strings that are *only* the names of modifiers
@@ -1181,10 +1274,11 @@ def test_modifiers():
     # Check a few combinations
     assert latex(symbols("xvecdot")) == r"\dot{\vec{x}}"
     assert latex(symbols("xDotVec")) == r"\vec{\dot{x}}"
-    assert latex(symbols("xHATNorm")) == r"\left\lVert{\hat{x}}\right\rVert"
+    assert latex(symbols("xHATNorm")) == r"\left\|{\hat{x}}\right\|"
     # Check a couple big, ugly combinations
-    assert latex(symbols('xMathringBm_yCheckPRM__zbreveAbs')) == r"\boldsymbol{\mathring{x}}^{\left\lvert{\breve{z}}\right\rvert}_{{\check{y}}'}"
+    assert latex(symbols('xMathringBm_yCheckPRM__zbreveAbs')) == r"\boldsymbol{\mathring{x}}^{\left|{\breve{z}}\right|}_{{\check{y}}'}"
     assert latex(symbols('alphadothat_nVECDOT__tTildePrime')) == r"\hat{\dot{\alpha}}^{{\tilde{t}}'}_{\dot{\vec{n}}}"
+
 
 def test_greek_symbols():
     assert latex(Symbol('alpha'))   == r'\alpha'
@@ -1245,9 +1339,11 @@ def test_greek_symbols():
     assert latex(Symbol('varsigma')) == r'\varsigma'
     assert latex(Symbol('vartheta')) == r'\vartheta'
 
+
 @XFAIL
 def test_builtin_without_args_mismatched_names():
     assert latex(CosineTransform) == r'\mathcal{COS}'
+
 
 def test_builtin_no_args():
     assert latex(Chi) == r'\operatorname{Chi}'
@@ -1256,9 +1352,11 @@ def test_builtin_no_args():
     assert latex(DiracDelta) == r'\delta'
     assert latex(lowergamma) == r'\gamma'
 
+
 def test_issue_6853():
     p = Function('Pi')
     assert latex(p(x)) == r"\Pi{\left (x \right )}"
+
 
 def test_Mul():
     e = Mul(-2, x + 1, evaluate=False)
@@ -1276,6 +1374,7 @@ def test_Mul():
     e = Mul(2, x + 1)
     assert latex(e)  == r'2 x + 2'
 
+
 def test_Pow():
     e = Pow(2, 2, evaluate=False)
     assert latex(e)  == r'2^{2}'
@@ -1284,3 +1383,28 @@ def test_Pow():
 def test_issue_7180():
     assert latex(Equivalent(x, y)) == r"x \equiv y"
     assert latex(Not(Equivalent(x, y))) == r"x \not\equiv y"
+
+
+def test_issue_8409():
+    assert latex(S.Half**n) == r"\left(\frac{1}{2}\right)^{n}"
+
+
+def test_issue_8470():
+    from sympy.parsing.sympy_parser import parse_expr
+    e = parse_expr("-B*A", evaluate=False)
+    assert latex(e) == r"A \left(- B\right)"
+
+
+def test_issue_7117():
+    # See also issue #5031 (hence the evaluate=False in these).
+    e = Eq(x + 1, 2*x)
+    q = Mul(2, e, evaluate=False)
+    assert latex(q) == r"2 \left(x + 1 = 2 x\right)"
+    q = Add(6, e, evaluate=False)
+    assert latex(q) == r"6 + \left(x + 1 = 2 x\right)"
+    q = Pow(e, 2, evaluate=False)
+    assert latex(q) == r"\left(x + 1 = 2 x\right)^{2}"
+
+
+def test_issue_2934():
+    assert latex(Symbol(r'\frac{a_1}{b_1}')) == '\\frac{a_1}{b_1}'

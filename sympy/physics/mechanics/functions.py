@@ -1,11 +1,9 @@
 from __future__ import print_function, division
-import warnings
 
-from sympy.utilities.exceptions import SymPyDeprecationWarning
-from sympy.utilities.misc import filldedent
 from sympy.utilities import dict_merge
 from sympy.utilities.iterables import iterable
-from sympy.physics.vector import Vector, ReferenceFrame, Point, dynamicsymbols
+from sympy.physics.vector import (Dyadic, Vector, ReferenceFrame,
+                                  Point, dynamicsymbols)
 from sympy.physics.vector.printing import (vprint, vsprint, vpprint, vlatex,
                                            init_vprinting)
 from sympy.physics.mechanics.particle import Particle
@@ -29,8 +27,6 @@ __all__ = ['inertia',
            'msubs',
            'find_dynamicsymbols']
 
-warnings.simplefilter("always", SymPyDeprecationWarning)
-
 # These are functions that we've moved and renamed during extracting the
 # basic vector calculus code from the mechanics packages.
 
@@ -41,26 +37,6 @@ mlatex = vlatex
 
 
 def mechanics_printing(**kwargs):
-
-    # mechanics_printing has slightly different functionality in 0.7.5 but
-    # shouldn't fundamentally need a deprecation warning so we do this
-    # little wrapper that gives the warning that things have changed.
-
-    # TODO : Remove this warning in the release after SymPy 0.7.5
-
-    # The message is only printed if this function is called with no args,
-    # as was the previous only way to call it.
-
-    def dict_is_empty(D):
-        for k in D:
-            return False
-        return True
-
-    if dict_is_empty(kwargs):
-        msg = ('See the doc string for slight changes to this function: '
-               'keyword args may be needed for the desired effect. '
-               'Otherwise use sympy.physics.vector.init_vprinting directly.')
-        SymPyDeprecationWarning(filldedent(msg)).warn()
 
     init_vprinting(**kwargs)
 
@@ -487,7 +463,7 @@ def msubs(expr, *sub_dicts, **kwargs):
         func = _smart_subs
     else:
         func = lambda expr, sub_dict: _crawl(expr, _sub_func, sub_dict)
-    if isinstance(expr, Matrix):
+    if isinstance(expr, (Matrix, Vector, Dyadic)):
         return expr.applyfunc(lambda x: func(x, sub_dict))
     else:
         return func(expr, sub_dict)

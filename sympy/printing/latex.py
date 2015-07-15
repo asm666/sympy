@@ -4,10 +4,11 @@ A Printer which converts an expression into its LaTeX equivalent.
 
 from __future__ import print_function, division
 
-from sympy.core import S, C, Add, Symbol
+from sympy.core import S, Add, Symbol
 from sympy.core.function import _coeff_isneg
 from sympy.core.sympify import SympifyError
 from sympy.core.alphabets import greeks
+from sympy.core.operations import AssocOp
 from sympy.logic.boolalg import true
 
 ## sympy.printing imports
@@ -15,10 +16,10 @@ from .printer import Printer
 from .conventions import split_super_sub, requires_partial
 from .precedence import precedence, PRECEDENCE
 
-import sympy.mpmath.libmp as mlib
-from sympy.mpmath.libmp import prec_to_dps
+import mpmath.libmp as mlib
+from mpmath.libmp import prec_to_dps
 
-from sympy.core.compatibility import default_sort_key, xrange
+from sympy.core.compatibility import default_sort_key, range
 from sympy.utilities.iterables import has_variety
 
 import re
@@ -87,10 +88,10 @@ modifier_dict = {
     'scr': lambda s: r'\mathscr{'+s+r'}',
     'frak': lambda s: r'\mathfrak{'+s+r'}',
     # Brackets
-    'norm': lambda s: r'\left\lVert{'+s+r'}\right\rVert',
+    'norm': lambda s: r'\left\|{'+s+r'}\right\|',
     'avg': lambda s: r'\left\langle{'+s+r'}\right\rangle',
-    'abs': lambda s: r'\left\lvert{'+s+r'}\right\rvert',
-    'mag': lambda s: r'\left\lvert{'+s+r'}\right\rvert',
+    'abs': lambda s: r'\left|{'+s+r'}\right|',
+    'mag': lambda s: r'\left|{'+s+r'}\right|',
 }
 
 greek_letters_set = frozenset(greeks)
@@ -111,6 +112,8 @@ class LatexPrinter(Printer):
         "mat_str": None,
         "mat_delim": "[",
         "symbol_names": {},
+        "align": "c",
+        "sparse": False
     }
 
     def __init__(self, settings=None):
@@ -168,7 +171,8 @@ class LatexPrinter(Printer):
         10 => False; -10 => True.
         """
         return not ((expr.is_Integer and expr.is_nonnegative)
-                or (expr.is_Atom and expr is not S.NegativeOne))
+                    or (expr.is_Atom and (expr is not S.NegativeOne
+                                          and expr.is_Rational is False)))
 
     def _needs_function_brackets(self, expr):
         """
@@ -193,17 +197,42 @@ class LatexPrinter(Printer):
             else:
                 return False
 
-    def _needs_mul_brackets(self, expr, last=False):
+    def _needs_mul_brackets(self, expr, first=False, last=False):
         """
         Returns True if the expression needs to be wrapped in brackets when
         printed as part of a Mul, False otherwise. This is True for Add,
         but also for some container objects that would not need brackets
         when appearing last in a Mul, e.g. an Integral. ``last=True``
         specifies that this expr is the last to appear in a Mul.
+        ``first=True`` specifies that this expr is the first to appear in a Mul.
         """
         from sympy import Integral, Piecewise, Product, Sum
-        return expr.is_Add or (not last and
-            any([expr.has(x) for x in (Integral, Piecewise, Product, Sum)]))
+
+        if expr.is_Add:
+            return True
+        elif expr.is_Relational:
+            return True
+        elif expr.is_Mul:
+            if not first and _coeff_isneg(expr):
+                return True
+
+        if (not last and
+            any([expr.has(x) for x in (Integral, Piecewise, Product, Sum)])):
+            return True
+
+        return False
+
+
+    def _needs_add_brackets(self, expr):
+        """
+        Returns True if the expression needs to be wrapped in brackets when
+        printed as part of an Add, False otherwise.  This is False for most
+        things.
+        """
+        if expr.is_Relational:
+            return True
+        return False
+
 
     def _mul_is_clean(self, expr):
         for arg in expr.args:
@@ -229,20 +258,29 @@ class LatexPrinter(Printer):
     def _print_NoneType(self, e):
         return r"\mathrm{%s}" % e
 
+
     def _print_Add(self, expr, order=None):
         if self.order == 'none':
             terms = list(expr.args)
         else:
             terms = self._as_ordered_terms(expr, order=order)
-        tex = self._print(terms[0])
 
-        for term in terms[1:]:
-            if not _coeff_isneg(term):
-                tex += " + " + self._print(term)
+        tex = ""
+        for i, term in enumerate(terms):
+            if i == 0:
+                pass
+            elif _coeff_isneg(term):
+                tex += " - "
+                term = -term
             else:
-                tex += " - " + self._print(-term)
+                tex += " + "
+            term_tex = self._print(term)
+            if self._needs_add_brackets(term):
+                term_tex = r"\left(%s\right)" % term_tex
+            tex += term_tex
 
         return tex
+
 
     def _print_Float(self, expr):
         # Based off of that in StrPrinter
@@ -268,13 +306,11 @@ class LatexPrinter(Printer):
             return str_real
 
     def _print_Mul(self, expr):
-        coeff, _ = expr.as_coeff_Mul()
-
-        if not coeff.is_negative:
-            tex = ""
-        else:
+        if _coeff_isneg(expr):
             expr = -expr
             tex = "- "
+        else:
+            tex = ""
 
         from sympy.simplify import fraction
         numer, denom = fraction(expr, exact=True)
@@ -295,7 +331,8 @@ class LatexPrinter(Printer):
                 for i, term in enumerate(args):
                     term_tex = self._print(term)
 
-                    if self._needs_mul_brackets(term, last=(i == len(args) - 1)):
+                    if self._needs_mul_brackets(term, first=(i == 0),
+                                                last=(i == len(args) - 1)):
                         term_tex = r"\left(%s\right)" % term_tex
 
                     if re.search("[0-9][} ]*$", last_term_tex) and \
@@ -513,7 +550,7 @@ class LatexPrinter(Printer):
 
             tex = r"\frac{%s^{%s}}{%s} " % (diff_symbol, dim, tex)
 
-        if isinstance(expr.expr, C.AssocOp):
+        if isinstance(expr.expr, AssocOp):
             return r"%s\left(%s\right)" % (tex, self._print(expr.expr))
         else:
             return r"%s %s" % (tex, self._print(expr.expr))
@@ -562,10 +599,13 @@ class LatexPrinter(Printer):
     def _print_Limit(self, expr):
         e, z, z0, dir = expr.args
 
-        tex = r"\lim_{%s \to %s}" % (self._print(z),
-                                     self._print(z0))
+        tex = r"\lim_{%s \to " % self._print(z)
+        if z0 in (S.Infinity, S.NegativeInfinity):
+            tex += r"%s}" % self._print(z0)
+        else:
+            tex += r"%s^%s}" % (self._print(z0), self._print(dir))
 
-        if isinstance(e, C.AssocOp):
+        if isinstance(e, AssocOp):
             return r"%s\left(%s\right)" % (tex, self._print(e))
         else:
             return r"%s %s" % (tex, self._print(e))
@@ -716,7 +756,7 @@ class LatexPrinter(Printer):
             return tex
 
     def _print_Abs(self, expr, exp=None):
-        tex = r"\left\lvert{%s}\right\rvert" % self._print(expr.args[0])
+        tex = r"\left|{%s}\right|" % self._print(expr.args[0])
 
         if exp is not None:
             return r"%s^{%s}" % (tex, exp)
@@ -779,7 +819,7 @@ class LatexPrinter(Printer):
         return self._print_LogOp(args, r"\veebar")
 
     def _print_Implies(self, e, altchar=None):
-        return r"%s %s %s" % (self._print(e.args[0]), altchar or r"\Rightarrow", self._print(e.args[1]))
+        return self._print_LogOp(e.args, altchar or r"\Rightarrow")
 
     def _print_Equivalent(self, e, altchar=None):
         args = sorted(e.args, key=default_sort_key)
@@ -944,14 +984,24 @@ class LatexPrinter(Printer):
             return tex
 
     def _print_RisingFactorial(self, expr, exp=None):
-        tex = r"{\left(%s\right)}^{\left(%s\right)}" % \
-            (self._print(expr.args[0]), self._print(expr.args[1]))
+        n, k = expr.args
+        if self._needs_brackets(n):
+            base = r"\left(%s\right)" % self._print(n)
+        else:
+            base = self._print(n)
+
+        tex = r"{%s}^{\left(%s\right)}" % (base, self._print(k))
 
         return self._do_exponent(tex, exp)
 
     def _print_FallingFactorial(self, expr, exp=None):
-        tex = r"{\left(%s\right)}_{\left(%s\right)}" % \
-            (self._print(expr.args[0]), self._print(expr.args[1]))
+        n, k = expr.args
+        if self._needs_brackets(k):
+            sub = r"\left(%s\right)" % self._print(k)
+        else:
+            sub = self._print(k)
+
+        tex = r"{\left(%s\right)}_{%s}" % (self._print(n), sub)
 
         return self._do_exponent(tex, exp)
 
@@ -1193,7 +1243,8 @@ class LatexPrinter(Printer):
         if expr in self._settings['symbol_names']:
             return self._settings['symbol_names'][expr]
 
-        return self._deal_with_super_sub(expr.name)
+        return self._deal_with_super_sub(expr.name) if \
+            '\\' not in expr.name else expr.name
 
     _print_RandomSymbol = _print_Symbol
     _print_MatrixSymbol = _print_Symbol
@@ -1251,14 +1302,14 @@ class LatexPrinter(Printer):
         lines = []
 
         for line in range(expr.rows):  # horrible, should be 'rows'
-            lines.append(" & ".join([ self._print(i) for i in expr[line, :] ]))
+            lines.append(" & ".join([(self._print(i) if not self._settings['sparse'] or i != 0 else "") for i in expr[line, :] ]))
 
         mat_str = self._settings['mat_str']
         if mat_str is None:
             if self._settings['mode'] == 'inline':
                 mat_str = 'smallmatrix'
             else:
-                if (expr.cols <= 10) is True:
+                if (expr.cols <= 10) is True and self._settings['align'] == 'c':
                     mat_str = 'matrix'
                 else:
                     mat_str = 'array'
@@ -1266,7 +1317,7 @@ class LatexPrinter(Printer):
         out_str = r'\begin{%MATSTR%}%s\end{%MATSTR%}'
         out_str = out_str.replace('%MATSTR%', mat_str)
         if mat_str == 'array':
-            out_str = out_str.replace('%s', '{' + 'c'*expr.cols + '}%s')
+            out_str = out_str.replace('%s', '{' + self._settings['align']*expr.cols + '}%s')
         if self._settings['mat_delim']:
             left_delim = self._settings['mat_delim']
             right_delim = self._delim_dict[left_delim]
@@ -1344,7 +1395,7 @@ class LatexPrinter(Printer):
             return "%s^{%s}" % (self._print(base), self._print(exp))
 
     def _print_ZeroMatrix(self, Z):
-        return r"\bold{0}"
+        return r"\mathbb{0}"
 
     def _print_Identity(self, I):
         return r"\mathbb{I}"
@@ -1402,7 +1453,7 @@ class LatexPrinter(Printer):
 
     def _print_LeviCivita(self, expr, exp=None):
         indices = map(self._print, expr.args)
-        if all(map(lambda x: x.is_Atom, expr.args)):
+        if all(x.is_Atom for x in expr.args):
             tex = r'\varepsilon_{%s}' % " ".join(indices)
         else:
             tex = r'\varepsilon_{%s}' % ", ".join(indices)
@@ -1448,6 +1499,25 @@ class LatexPrinter(Printer):
               + r", ".join(self._print(el) for el in printset)
               + r"\right\}")
 
+    def _print_SeqFormula(self, s):
+        if s.start is S.NegativeInfinity:
+            stop = s.stop
+            printset = ('\ldots', s.coeff(stop - 3), s.coeff(stop - 2),
+                s.coeff(stop - 1), s.coeff(stop))
+        elif s.stop is S.Infinity or s.length > 4:
+            printset = s[:4]
+            printset.append('\ldots')
+        else:
+            printset = tuple(s)
+
+        return (r"\left\["
+              + r", ".join(self._print(el) for el in printset)
+              + r"\right\]")
+
+    _print_SeqPer = _print_SeqFormula
+    _print_SeqAdd = _print_SeqFormula
+    _print_SeqMul = _print_SeqFormula
+
     def _print_Interval(self, i):
         if i.start == i.end:
             return r"\left\{%s\right\}" % self._print(i.start)
@@ -1475,6 +1545,9 @@ class LatexPrinter(Printer):
     def _print_Intersection(self, u):
         return r" \cap ".join([self._print(i) for i in u.args])
 
+    def _print_SymmetricDifference(self, u):
+        return r" \triangle ".join([self._print(i) for i in u.args])
+
     def _print_EmptySet(self, e):
         return r"\emptyset"
 
@@ -1487,6 +1560,9 @@ class LatexPrinter(Printer):
     def _print_Reals(self, i):
         return r"\mathbb{R}"
 
+    def _print_Complex(self, i):
+        return r"\mathbb{C}"
+
     def _print_ImageSet(self, s):
         return r"\left\{%s\; |\; %s \in %s\right\}" % (
             self._print(s.lamda.expr),
@@ -1495,6 +1571,9 @@ class LatexPrinter(Printer):
 
     def _print_Contains(self, e):
         return r"%s \in %s" % tuple(self._print(a) for a in e.args)
+
+    def _print_FourierSeries(self, s):
+        return self._print_Add(s.truncate()) + self._print(' + \ldots')
 
     def _print_FiniteField(self, expr):
         return r"\mathbb{F}_{%s}" % expr.mod
@@ -1669,10 +1748,10 @@ class LatexPrinter(Printer):
         return latex_result
 
     def _print_DiagramGrid(self, grid):
-        latex_result = "\\begin{array}{%s}\n" % ("c" * grid.width)
+        latex_result = "\\begin{array}{%s}\n" % (self._settings["align"] * grid.width)
 
-        for i in xrange(grid.height):
-            for j in xrange(grid.width):
+        for i in range(grid.height):
+            for j in range(grid.width):
                 if grid[i, j]:
                     latex_result += latex(grid[i, j])
                 latex_result += " "
@@ -1748,6 +1827,25 @@ class LatexPrinter(Printer):
     def _print_totient(self, expr):
         return r'\phi\left( %s \right)' %  self._print(expr.args[0])
 
+    def _print_divisor_sigma(self, expr, exp=None):
+        if len(expr.args) == 2:
+            tex = r"_%s\left(%s\right)" % tuple(map(self._print,
+                                                (expr.args[1], expr.args[0])))
+        else:
+            tex = r"\left(%s\right)" % self._print(expr.args[0])
+        if exp is not None:
+            return r"\sigma^{%s}%s" % (self._print(exp), tex)
+        return r"\sigma%s" % tex
+
+    def _print_udivisor_sigma(self, expr, exp=None):
+        if len(expr.args) == 2:
+            tex = r"_%s\left(%s\right)" % tuple(map(self._print,
+                                                (expr.args[1], expr.args[0])))
+        else:
+            tex = r"\left(%s\right)" % self._print(expr.args[0])
+        if exp is not None:
+            return r"\sigma^*^{%s}%s" % (self._print(exp), tex)
+        return r"\sigma^*%s" % tex
 
 def translate(s):
     r'''

@@ -109,7 +109,7 @@
 from __future__ import print_function, division
 
 from sympy.core import Expr, Tuple, Symbol, sympify, S
-from sympy.core.compatibility import is_sequence, string_types, NotIterable
+from sympy.core.compatibility import is_sequence, string_types, NotIterable, range
 
 
 class IndexException(Exception):
@@ -134,7 +134,7 @@ class Indexed(Expr):
     """
     is_commutative = True
 
-    def __new__(cls, base, *args, **kw_args):
+    def __new__(cls, base, *args):
         from sympy.utilities.misc import filldedent
 
         if not args:
@@ -145,7 +145,7 @@ class Indexed(Expr):
             raise TypeError(filldedent("""
                 Indexed expects string, Symbol or IndexedBase as base."""))
         args = list(map(sympify, args))
-        return Expr.__new__(cls, base, *args, **kw_args)
+        return Expr.__new__(cls, base, *args)
 
     @property
     def base(self):
